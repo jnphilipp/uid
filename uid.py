@@ -82,7 +82,7 @@ def uid_from_file(
             ]
 
         sum_o2 = 0.0
-        for i in range(2, len(surprisal_values) - 1):
+        for i in range(1, len(surprisal_values) - 1):
             sum_o2 += (surprisal_values[i] - surprisal_values[i + 1]) ** 2
 
         return -1.0 * (sum_o2 / (len(surprisal_values) - 1))
