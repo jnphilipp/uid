@@ -124,6 +124,12 @@ if __name__ == "__main__":
         type=lambda p: Path(p).absolute(),
         help="file(s) to load surprisal data from.",
     )
+    parser.add_argument(
+        "--names",
+        nargs="+",
+        type=str,
+        help="name(s) to use in plot, needs to be the same length as DATA.",
+    )
 
     # plot
     fill_group = parser.add_mutually_exclusive_group()
@@ -213,7 +219,12 @@ if __name__ == "__main__":
         handlers=handlers,
     )
 
-    for path in args.DATA:
+    if len(args.DATA) != len(args.names):
+        logging.error("DATA and names needs to be the same length.")
+        sys.exit(1)
+
+    plt.figure(figsize=(25.6, 14.4), dpi=100)
+    for i, path in enumerate(args.DATA):
         prob_density = gaussian_kde(
             uid_from_file(path, verbose=args.verbose),
             bw_method=float(args.bw_method)
@@ -223,7 +234,7 @@ if __name__ == "__main__":
 
         x = list(range(-args.x_start, 1))
         y = prob_density(x)
-        plt.plot(x, y, label=path.name)
+        plt.plot(x, y, label=args.names[i] if args.names else path.name)
 
         if args.fill_area and args.no_fill_area:
             plt.fill_between(x, y, alpha=0.4)
