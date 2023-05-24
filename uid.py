@@ -215,7 +215,7 @@ if __name__ == "__main__":
 
     for path in args.DATA:
         prob_density = gaussian_kde(
-            uid_from_file(path),
+            uid_from_file(path, verbose=args.verbose),
             bw_method=float(args.bw_method)
             if args.bw_method.replace(".", "", 1).isdigit()
             else args.bw_method,
