@@ -33,7 +33,7 @@ from argparse import (
 from joblib import Parallel, delayed
 from pathlib import Path
 from scipy.stats import gaussian_kde
-from typing import List
+from typing import Dict, List, Optional
 
 
 __author__ = "J. Nathanael Philipp (jnphilipp)"
@@ -67,7 +67,16 @@ def uid_from_file(
     batch_size: int = 128,
     verbose: int = 10,
 ) -> List[float]:
-    """Read surprisal values from file and calculate uid."""
+    """Read surprisal values from file and calculate uid.
+
+    Args:
+     * path: path to load surpriasl values from.
+     * batch_size: batch sized to use in parrallelisation.
+     * verbose: joblib verbosity
+
+    Return:
+     Returns a list of UID values, one per text.
+    """
 
     def calculate_uid(line: str) -> float:
         if ";" in line and "," in line:
@@ -101,6 +110,41 @@ def uid_from_file(
     return uids
 
 
+def plot_density(
+    data: Dict[str, List[float]],
+    bw_method: str | float = "scott",
+    plot_area: bool = True,
+    path: Optional[str | Path] = None,
+) -> None:
+    """Create a density plot using `gaussian_kde`.
+
+    Args:
+     * data: from the density plot. Dict keys used as series label.
+     * bw_method: bandwith method used in `gaussian_kde`.
+     * plot_area: plot the area under the density curve.
+     * path: path to save plot to.
+    """
+    if isinstance(bw_method, str):
+        assert bw_method in ["scott", "silverman"]
+
+    plt.figure(figsize=(25.6, 14.4), dpi=100)
+    for k, v in data.items():
+        prob_density = gaussian_kde(v, bw_method=bw_method)
+
+        x = list(range(int(min(v) - 1), int(max(v) + 1)))
+        y = prob_density(x)
+        plt.plot(x, y, label=k)
+
+        if plot_area:
+            plt.fill_between(x, y, alpha=0.4)
+    plt.legend()
+
+    if path:
+        plt.savefig(path)
+    else:
+        plt.show()
+
+
 def filter_info(rec: logging.LogRecord) -> bool:
     """Log record filter for info and lower levels.
 
@@ -117,40 +161,6 @@ if __name__ == "__main__":
         "--version",
         action="version",
         version=VERSION,
-    )
-    parser.add_argument(
-        "DATA",
-        nargs="+",
-        type=lambda p: Path(p).absolute(),
-        help="file(s) to load surprisal data from.",
-    )
-    parser.add_argument(
-        "--names",
-        nargs="+",
-        type=str,
-        help="name(s) to use in plot, needs to be the same length as DATA.",
-    )
-
-    # plot
-    fill_group = parser.add_mutually_exclusive_group()
-    fill_group.add_argument("--fill-area", action="store_true")
-    fill_group.add_argument("--no-fill-area", action="store_false")
-    parser.add_argument(
-        "-o",
-        "--output",
-        type=lambda p: Path(p).absolute(),
-    )
-
-    # density
-    parser.add_argument(
-        "--x-start",
-        type=int,
-        required=True,
-    )
-    parser.add_argument(
-        "--bw-method",
-        type=str,
-        default="scott",
     )
 
     # logging
@@ -177,6 +187,44 @@ if __name__ == "__main__":
         default="[%(levelname)s] %(message)s",
         help="set logging format for log file.",
     )
+
+    # data
+    parser.add_argument(
+        "DATA",
+        nargs="+",
+        type=lambda p: Path(p).absolute(),
+        help="file(s) to load surprisal data from.",
+    )
+    parser.add_argument(
+        "--names",
+        nargs="+",
+        type=str,
+        help="name(s) to use in plot, needs to be the same length as DATA.",
+    )
+
+    # action
+    action_group = parser.add_mutually_exclusive_group(required=True)
+    action_group.add_argument(
+        "--plot-density", action="store_true", help="create density plot of UID values."
+    )
+    action_group.add_argument(
+        "--append-to-source",
+        action="store_true",
+        help="append UID values to source files.",
+    )
+
+    # plot options
+    parser.add_argument(
+        "--bw-method",
+        type=lambda x: x if x in ["scott", "silverman"] else float(x),
+        default="scott",
+        help="method used to calculate the estimator bandwidth, this can be 'scott', "
+        + "'silverman' or a scalar constant.",
+    )
+    parser.add_argument(
+        "--plot-file", type=lambda p: Path(p).absolute(), help="file to save plot to."
+    )
+
     args = parser.parse_args()
 
     if args.verbose == 0:
@@ -223,24 +271,14 @@ if __name__ == "__main__":
         logging.error("DATA and names needs to be the same length.")
         sys.exit(1)
 
-    plt.figure(figsize=(25.6, 14.4), dpi=100)
+    uids = {}
     for i, path in enumerate(args.DATA):
-        prob_density = gaussian_kde(
-            uid_from_file(path, verbose=args.verbose),
-            bw_method=float(args.bw_method)
-            if args.bw_method.replace(".", "", 1).isdigit()
-            else args.bw_method,
+        logging.info(f"Load surprisal data from {path} and calculate UIDs.")
+        uids[args.names[i] if args.names else path.name] = uid_from_file(
+            path, verbose=args.verbose
         )
 
-        x = list(range(-args.x_start, 1))
-        y = prob_density(x)
-        plt.plot(x, y, label=args.names[i] if args.names else path.name)
-
-        if args.fill_area and args.no_fill_area:
-            plt.fill_between(x, y, alpha=0.4)
-    plt.legend()
-
-    if args.output:
-        plt.savefig(args.output)
-    else:
-        plt.show()
+    if args.plot_density:
+        plot_density(uids, args.bw_method, path=args.plot_file)
+    elif args.append_to_source:
+        raise NotImplementedError()
