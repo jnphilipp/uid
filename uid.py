@@ -219,7 +219,7 @@ if __name__ == "__main__":
         handlers=handlers,
     )
 
-    if len(args.DATA) != len(args.names):
+    if args.names is not None and len(args.DATA) != len(args.names):
         logging.error("DATA and names needs to be the same length.")
         sys.exit(1)
 
