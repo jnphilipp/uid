@@ -138,6 +138,8 @@ def plot_density(
         if plot_area:
             plt.fill_between(x, y, alpha=0.4)
     plt.legend()
+    plt.xlabel("$UID_{wordwise}$")
+    plt.ylabel("density")
 
     if path:
         plt.savefig(path)
