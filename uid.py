@@ -20,6 +20,7 @@
 """UID."""
 
 
+import gzip
 import joblib
 import logging
 import matplotlib.pyplot as plt
@@ -30,10 +31,11 @@ from argparse import (
     ArgumentParser,
     RawTextHelpFormatter,
 )
+from csv import DictReader, Sniffer
 from joblib import Parallel, delayed
 from pathlib import Path
 from scipy.stats import gaussian_kde
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 
 __author__ = "J. Nathanael Philipp (jnphilipp)"
@@ -64,6 +66,7 @@ class ArgFormatter(ArgumentDefaultsHelpFormatter, RawTextHelpFormatter):
 
 def uid_from_file(
     path: str | Path,
+    fields: Optional[str | List[str]],
     batch_size: int = 128,
     verbose: int = 10,
 ) -> List[float]:
@@ -78,17 +81,26 @@ def uid_from_file(
      Returns a list of UID values, one per text.
     """
 
-    def calculate_uid(line: str) -> float:
-        if ";" in line and "," in line:
-            surprisal_values = [
-                float(w.split("|")[1]) if "|" in w else 0.0
-                for s in line.split(";")
-                for w in s.split(",")
-            ]
-        elif "," in line:
-            surprisal_values = [
-                float(w.split("|")[1]) if "|" in w else 0.0 for w in line.split(",")
-            ]
+    def calculate_uid(*texts: str) -> float:
+        surprisal_values = []
+        for text in texts:
+            words = []
+            if text.startswith("[") and text.endswith("]") and "', '" in text:
+                words += text[1:-1].split("', '")
+            elif ";" in text and "," in text:
+                for s in text.split(";"):
+                    words += s.split(",")
+            elif "," in text:
+                words = text.split(",")
+
+            for w in words:
+                if "|" in w:
+                    surprisal_values.append(float(w.split("|")[1]))
+                else:
+                    try:
+                        surprisal_values.append(float(w))
+                    except ValueError:
+                        surprisal_values.append(0.0)
 
         sum_o2 = 0.0
         for i in range(1, len(surprisal_values) - 1):
@@ -98,14 +110,41 @@ def uid_from_file(
 
     if isinstance(path, str):
         path = Path(path)
+    if isinstance(fields, str):
+        fields = [fields]
 
-    with open(path, "r", encoding="utf8") as f:
-        with Parallel(
-            n_jobs=joblib.cpu_count(),
-            verbose=verbose,
-            batch_size=batch_size,
-        ) as parallel:
-            uids = parallel(delayed(calculate_uid)(line.strip()) for line in f)
+    fopen: Callable
+    if path.name.endswith(".gz"):
+        fopen = gzip.open
+    elif path.name.endswith((".txt", ".csv")):
+        fopen = open
+    else:
+        raise RuntimeError("Unsopported file type.")
+
+    with fopen(path, "rt", encoding="utf8") as f:
+        if path.name.endswith((".csv", ".csv.gz")):
+            assert fields is not None
+            dialect = Sniffer().sniff(f.readline())
+            f.seek(0)
+            reader = DictReader(f, dialect=dialect)
+            with Parallel(
+                n_jobs=joblib.cpu_count(),
+                verbose=verbose,
+                batch_size=batch_size,
+            ) as parallel:
+                uids = parallel(
+                    delayed(calculate_uid)(*(row[field] for field in fields))
+                    for row in reader
+                )
+        elif path.name.endswith((".txt", ".txt.gz")):
+            with Parallel(
+                n_jobs=joblib.cpu_count(),
+                verbose=verbose,
+                batch_size=batch_size,
+            ) as parallel:
+                uids = parallel(delayed(calculate_uid)(line.strip()) for line in f)
+        else:
+            raise RuntimeError("Unsopported file type.")
 
     return uids
 
@@ -198,6 +237,12 @@ if __name__ == "__main__":
         help="file(s) to load surprisal data from.",
     )
     parser.add_argument(
+        "--fields",
+        nargs="+",
+        type=str,
+        help="field(s) to load texts from, when using csv data.",
+    )
+    parser.add_argument(
         "--names",
         nargs="+",
         type=str,
@@ -277,7 +322,7 @@ if __name__ == "__main__":
     for i, path in enumerate(args.DATA):
         logging.info(f"Load surprisal data from {path} and calculate UIDs.")
         uids[args.names[i] if args.names else path.name] = uid_from_file(
-            path, verbose=args.verbose
+            path, args.fields, verbose=args.verbose
         )
 
     if args.plot_density:
