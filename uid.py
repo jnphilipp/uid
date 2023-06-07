@@ -133,7 +133,9 @@ def uid_from_file(
                 batch_size=batch_size,
             ) as parallel:
                 uids = parallel(
-                    delayed(calculate_uid)(*(row[field] for field in fields))
+                    delayed(calculate_uid)(
+                        *(row[field] for field in fields if row[field])
+                    )
                     for row in reader
                 )
         elif path.name.endswith((".txt", ".txt.gz")):
@@ -248,6 +250,11 @@ if __name__ == "__main__":
         type=str,
         help="name(s) to use in plot, needs to be the same length as DATA.",
     )
+    parser.add_argument(
+        "--fields-as-series",
+        action="store_true",
+        help="calculate UID for each field different and use it as a series.",
+    )
 
     # action
     action_group = parser.add_mutually_exclusive_group(required=True)
@@ -314,16 +321,39 @@ if __name__ == "__main__":
         handlers=handlers,
     )
 
-    if args.names is not None and len(args.DATA) != len(args.names):
+    if (
+        args.names is not None
+        and not args.fields_as_series
+        and len(args.DATA) != len(args.names)
+    ):
         logging.error("DATA and names needs to be the same length.")
+        sys.exit(1)
+    elif (
+        args.names is not None
+        and args.fields is not None
+        and not args.fields_as_series
+        and len(args.DATA) * len(args.fields) != len(args.names)
+    ):
+        logging.error(
+            "With --fields-as-series names needs to be the same length as DATA * "
+            + "--fields."
+        )
         sys.exit(1)
 
     uids = {}
     for i, path in enumerate(args.DATA):
         logging.info(f"Load surprisal data from {path} and calculate UIDs.")
-        uids[args.names[i] if args.names else path.name] = uid_from_file(
-            path, args.fields, verbose=args.verbose
-        )
+        if args.fields_as_series:
+            for j, field in enumerate(args.fields):
+                uids[
+                    args.names[(i * len(args.fields)) + j]
+                    if args.names
+                    else f"{field}-{path.name}"
+                ] = uid_from_file(path, field, verbose=args.verbose)
+        else:
+            uids[args.names[i] if args.names else path.name] = uid_from_file(
+                path, args.fields, verbose=args.verbose
+            )
 
     if args.plot_density:
         plot_density(uids, args.bw_method, path=args.plot_file)
